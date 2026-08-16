@@ -1,0 +1,287 @@
+import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import type {
+  AnalysisResult,
+  DimensionScore,
+  InterviewQuestion,
+  Priority,
+  ResumeSuggestion,
+} from "./types";
+
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const DEFAULT_MODEL = "deepseek-v4-flash";
+const REQUEST_TIMEOUT_MS = 120_000;
+
+export class DeepSeekError extends Error {}
+
+export interface DeepSeekUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface DeepSeekAnalysis {
+  result: AnalysisResult;
+  model: string;
+  usage?: DeepSeekUsage;
+}
+
+/** 主分析结果缺面试题时，用一次聚焦请求补齐。 */
+const REPAIR_SYSTEM_PROMPT = `你是一名求职面试官。请根据用户的简历与目标岗位描述，生成该岗位最可能被问到的面试问题及参考回答。
+
+规则：
+1. 输出语言必须跟随「目标岗位描述」的语言。
+2. 只输出一个合法 JSON 对象，不要输出任何其他内容。
+3. 必须严格按照以下结构返回：
+{
+  "interviewQuestions": [{ "question": "问题", "referenceAnswer": "参考回答" }]
+}
+4. interviewQuestions 必须恰好 10 条，绝不能为空；实在无法生成针对该岗位的问题时，给出该岗位通用的高频面试题兜底。`;
+
+function buildRepairUserPrompt(
+  resumeText: string,
+  jobDescription: string
+): string {
+  return `【目标岗位描述】
+${jobDescription}
+
+【我的简历文字】
+${resumeText}
+
+请只输出 interviewQuestions（10 条），不要输出其他内容。`;
+}
+
+function getConfig(): { apiKey: string; model: string } {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    throw new DeepSeekError(
+      "未配置 DEEPSEEK_API_KEY，请在 .env.local 中设置后重启服务。"
+    );
+  }
+  const model = process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
+  return { apiKey, model };
+}
+
+function clampScore(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function toPriority(value: unknown): Priority {
+  const s = String(value ?? "").toLowerCase();
+  if (s === "high") return "high";
+  if (s === "low") return "low";
+  return "medium";
+}
+
+function toString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function parseJsonContent(content: string): unknown {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenced ? fenced[1].trim() : trimmed;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    // 继续尝试下面的兜底解析
+  }
+
+  const start = candidate.indexOf("{");
+  const end = candidate.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(candidate.slice(start, end + 1));
+    } catch {
+      // 继续抛出下面的错误
+    }
+  }
+
+  throw new DeepSeekError("AI 返回内容无法解析为有效结果，请重试。");
+}
+
+function normalizeQuestions(value: unknown): InterviewQuestion[] {
+  return Array.isArray(value)
+    ? value
+        .slice(0, 10)
+        .map((q) => {
+          const item = (q ?? {}) as Record<string, unknown>;
+          return {
+            question: toString(item.question),
+            referenceAnswer: toString(item.referenceAnswer),
+          };
+        })
+        .filter((q) => q.question.length > 0)
+    : [];
+}
+
+function normalizeResult(raw: unknown): AnalysisResult {
+  const data = (raw ?? {}) as Record<string, unknown>;
+  const match = (data.matchAnalysis ?? {}) as Record<string, unknown>;
+
+  const dimensions: DimensionScore[] = Array.isArray(match.dimensions)
+    ? match.dimensions
+        .slice(0, 6)
+        .map((d) => {
+          const item = (d ?? {}) as Record<string, unknown>;
+          return {
+            name: toString(item.name, "维度"),
+            score: clampScore(item.score),
+            comment: toString(item.comment),
+          };
+        })
+        .filter((d) => d.name && d.comment !== undefined)
+    : [];
+
+  const totalScore =
+    clampScore(match.totalScore) ||
+    (dimensions.length > 0
+      ? Math.round(
+          dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length
+        )
+      : 0);
+
+  const suggestions: ResumeSuggestion[] = Array.isArray(data.resumeSuggestions)
+    ? data.resumeSuggestions
+        .slice(0, 20)
+        .map((s) => {
+          const item = (s ?? {}) as Record<string, unknown>;
+          return {
+            category: toString(item.category, "其他"),
+            priority: toPriority(item.priority),
+            suggestion: toString(item.suggestion),
+          };
+        })
+        .filter((s) => s.suggestion.length > 0)
+    : [];
+
+  const coverLetter = toString(data.coverLetter).trim();
+
+  const hasContent =
+    dimensions.length > 0 ||
+    suggestions.length > 0 ||
+    normalizeQuestions(data.interviewQuestions).length > 0 ||
+    coverLetter.length > 0;
+
+  if (!hasContent) {
+    throw new DeepSeekError("AI 返回内容不完整，请重试。");
+  }
+
+  return {
+    matchAnalysis: {
+      totalScore,
+      dimensions,
+      summary: toString(match.summary),
+      gapAnalysis: toString(match.gapAnalysis),
+    },
+    resumeSuggestions: suggestions,
+    coverLetter,
+    interviewQuestions: normalizeQuestions(data.interviewQuestions),
+  };
+}
+
+interface DeepSeekRawResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+async function callDeepSeek(
+  apiKey: string,
+  model: string,
+  messages: Array<{ role: string; content: string }>
+): Promise<{ content: string; usage?: DeepSeekUsage }> {
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.7,
+      response_format: { type: "json_object" },
+      messages,
+    }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = (await response.json()) as {
+        error?: { message?: string };
+      };
+      if (body.error?.message) detail = body.error.message;
+    } catch {
+      // 忽略响应体解析失败
+    }
+    throw new DeepSeekError(
+      `DeepSeek API 调用失败（${detail}）。请检查 API Key 与模型配置后重试。`
+    );
+  }
+
+  const data = (await response.json()) as DeepSeekRawResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new DeepSeekError("DeepSeek API 未返回内容，请重试。");
+  }
+
+  const usage: DeepSeekUsage | undefined =
+    typeof data.usage?.prompt_tokens === "number" &&
+    typeof data.usage?.completion_tokens === "number"
+      ? {
+          inputTokens: data.usage.prompt_tokens,
+          outputTokens: data.usage.completion_tokens,
+        }
+      : undefined;
+
+  return { content, usage };
+}
+
+export async function analyzeResumeWithDeepSeek(
+  resumeText: string,
+  jobDescription: string
+): Promise<DeepSeekAnalysis> {
+  const { apiKey, model } = getConfig();
+
+  const main = await callDeepSeek(apiKey, model, [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: buildUserPrompt(resumeText, jobDescription) },
+  ]);
+  const result = normalizeResult(parseJsonContent(main.content));
+  let usage = main.usage;
+
+  // deepseek-v4-flash 偶发会把 interviewQuestions 输出为空数组，用一次聚焦请求补齐
+  if (result.interviewQuestions.length === 0) {
+    try {
+      const repair = await callDeepSeek(apiKey, model, [
+        { role: "system", content: REPAIR_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: buildRepairUserPrompt(resumeText, jobDescription),
+        },
+      ]);
+      const raw = (parseJsonContent(repair.content) ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const questions = normalizeQuestions(raw.interviewQuestions);
+      if (questions.length > 0) {
+        result.interviewQuestions = questions;
+        if (repair.usage && usage) {
+          usage = {
+            inputTokens: usage.inputTokens + repair.usage.inputTokens,
+            outputTokens: usage.outputTokens + repair.usage.outputTokens,
+          };
+        } else if (repair.usage) {
+          usage = repair.usage;
+        }
+      }
+    } catch {
+      // 补齐失败不阻塞主结果，前端会显示兜底提示
+    }
+  }
+
+  return { result, model, usage };
+}

@@ -1,0 +1,11 @@
+# Netlify configuration for Next.js (App Router) deployment
+[build]
+  command = "pnpm build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+# Next.js Runtime: enables SSR, API routes, ISR and the proxy (middleware)
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

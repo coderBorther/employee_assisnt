@@ -1,0 +1,231 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* 晨雾薄荷 · fresh-mint 设计令牌 */
+@theme {
+  --font-display: "Nunito", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --color-mist: #f5fbf7;
+  --color-leaf: #1e7a57;
+  --color-leaf-deep: #155c40;
+  --color-leaf-soft: #2e8f68;
+  --color-mint: #6ec7a4;
+  --color-mint-soft: #a9dfc6;
+  --color-sprout: #e4f4ec;
+  --color-sprout-deep: #bfe5d1;
+  --color-bark: #16362a;
+  --color-moss: #5b6f66;
+  --color-moss-light: #8ba096;
+  --color-frost: #eaf5fc;
+  --color-frost-deep: #4a9cc6;
+  --color-clay: #fde9e5;
+  --color-clay-deep: #c2544f;
+  --color-sand: #fcf0dc;
+  --color-sand-deep: #b57a1b;
+  --color-line: #deeae3;
+}
+
+:root {
+  --background: #f5fbf7;
+  --foreground: #16362a;
+  --card: #ffffff;
+  --card-foreground: #16362a;
+  --popover: #ffffff;
+  --popover-foreground: #16362a;
+  --primary: #1e7a57;
+  --primary-foreground: #ffffff;
+  --secondary: #e4f4ec;
+  --secondary-foreground: #155c40;
+  --muted: #eaf3ee;
+  --muted-foreground: #5b6f66;
+  --accent: #e4f4ec;
+  --accent-foreground: #155c40;
+  --destructive: #c2544f;
+  --border: #deeae3;
+  --input: #deeae3;
+  --ring: #6ec7a4;
+  --chart-1: #1e7a57;
+  --chart-2: #6ec7a4;
+  --chart-3: #a9dfc6;
+  --chart-4: #b57a1b;
+  --chart-5: #c2544f;
+  --radius: 0.875rem;
+  --sidebar: #f5fbf7;
+  --sidebar-foreground: #16362a;
+  --sidebar-primary: #1e7a57;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e4f4ec;
+  --sidebar-accent-foreground: #155c40;
+  --sidebar-border: #deeae3;
+  --sidebar-ring: #6ec7a4;
+}
+
+.dark {
+  --background: #0f1f18;
+  --foreground: #e7f3ec;
+  --card: #16281f;
+  --card-foreground: #e7f3ec;
+  --popover: #16281f;
+  --popover-foreground: #e7f3ec;
+  --primary: #6ec7a4;
+  --primary-foreground: #0f1f18;
+  --secondary: #1d352a;
+  --secondary-foreground: #d9f0e3;
+  --muted: #1d352a;
+  --muted-foreground: #9db5aa;
+  --accent: #1d352a;
+  --accent-foreground: #d9f0e3;
+  --destructive: #e07a72;
+  --border: rgb(255 255 255 / 0.09);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #6ec7a4;
+  --chart-1: #6ec7a4;
+  --chart-2: #a9dfc6;
+  --chart-3: #4a9cc6;
+  --chart-4: #d9a94a;
+  --chart-5: #e07a72;
+  --radius: 0.875rem;
+  --sidebar: #0f1f18;
+  --sidebar-foreground: #e7f3ec;
+  --sidebar-primary: #6ec7a4;
+  --sidebar-primary-foreground: #0f1f18;
+  --sidebar-accent: #1d352a;
+  --sidebar-accent-foreground: #d9f0e3;
+  --sidebar-border: rgb(255 255 255 / 0.09);
+  --sidebar-ring: #6ec7a4;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ---------- 晨雾背景层 ---------- */
+.mist-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.mist-bg::before {
+  content: "";
+  position: absolute;
+  top: -220px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1100px;
+  height: 560px;
+  background:
+    radial-gradient(520px 300px at 28% 40%, rgb(110 199 164 / 0.22), transparent 70%),
+    radial-gradient(560px 320px at 74% 30%, rgb(110 199 164 / 0.14), transparent 70%),
+    radial-gradient(480px 300px at 50% 8%, rgb(234 245 252 / 0.9), transparent 72%);
+  filter: blur(6px);
+}
+.mist-bg::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 720px;
+  height: 220px;
+  background-image: radial-gradient(rgb(30 122 87 / 0.1) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent 85%);
+  mask-image: linear-gradient(to bottom, black, transparent 85%);
+}
+.dark .mist-bg::before {
+  background:
+    radial-gradient(520px 300px at 28% 40%, rgb(110 199 164 / 0.16), transparent 70%),
+    radial-gradient(560px 320px at 74% 30%, rgb(74 156 198 / 0.12), transparent 70%),
+    radial-gradient(480px 300px at 50% 8%, rgb(110 199 164 / 0.1), transparent 72%);
+}
+.dark .mist-bg::after {
+  background-image: radial-gradient(rgb(110 199 164 / 0.12) 1px, transparent 1px);
+}
+
+/* ---------- 入场动效 ---------- */
+.reveal {
+  animation: rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.reveal-1 {
+  animation-delay: 0.08s;
+}
+.reveal-2 {
+  animation-delay: 0.14s;
+}
+.reveal-3 {
+  animation-delay: 0.2s;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
