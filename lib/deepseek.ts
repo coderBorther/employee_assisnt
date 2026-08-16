@@ -1,8 +1,15 @@
-import { SYSTEM_PROMPT, buildUserPrompt } from "./prompt";
+import {
+  SYSTEM_PROMPT,
+  OPTIMIZE_SYSTEM_PROMPT,
+  buildUserPrompt,
+  buildOptimizeUserPrompt,
+} from "./prompt";
 import type {
   AnalysisResult,
+  DimensionKey,
   DimensionScore,
   InterviewQuestion,
+  OptimizedResumeResult,
   Priority,
   ResumeSuggestion,
 } from "./types";
@@ -10,6 +17,58 @@ import type {
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const REQUEST_TIMEOUT_MS = 120_000;
+
+/** 采样温度：越低越确定（配合固定 seed，同输入结果基本一致）。 */
+const SAMPLING_TEMPERATURE = 0.2;
+
+/** 服务端计算总分的固定权重（key -> 权重）。 */
+const DIMENSION_WEIGHTS: Record<DimensionKey, number> = {
+  skill: 0.35,
+  experience: 0.35,
+  education: 0.15,
+  overall: 0.15,
+};
+
+/**
+ * 由输入内容派生稳定的 seed（FNV-1a 32 位）：同输入恒同 seed，不同输入不同 seed。
+ */
+function deriveSeed(...inputs: string[]): number {
+  let hash = 0x811c9dc5;
+  for (const s of inputs) {
+    for (let i = 0; i < s.length; i++) {
+      hash ^= s.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    hash ^= 0xff;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
+function normalizeDimensionKey(value: unknown): DimensionKey | undefined {
+  const k = typeof value === "string" ? value : "";
+  if (k === "skill" || k === "experience" || k === "education" || k === "overall") {
+    return k;
+  }
+  return undefined;
+}
+
+/**
+ * 按固定权重计算总分；没有带 key 的维度时返回 null（走旧回退逻辑）。
+ */
+function computeWeightedTotal(dimensions: DimensionScore[]): number | null {
+  const weighted = dimensions.filter(
+    (d): d is DimensionScore & { key: DimensionKey } =>
+      d.key !== undefined && DIMENSION_WEIGHTS[d.key] !== undefined
+  );
+  if (weighted.length === 0) return null;
+  const totalWeight = weighted.reduce((sum, d) => sum + DIMENSION_WEIGHTS[d.key], 0);
+  const weightedSum = weighted.reduce(
+    (sum, d) => sum + d.score * DIMENSION_WEIGHTS[d.key],
+    0
+  );
+  return Math.round(weightedSum / totalWeight);
+}
 
 export class DeepSeekError extends Error {}
 
@@ -126,6 +185,7 @@ function normalizeResult(raw: unknown): AnalysisResult {
         .map((d) => {
           const item = (d ?? {}) as Record<string, unknown>;
           return {
+            key: normalizeDimensionKey(item.key),
             name: toString(item.name, "维度"),
             score: clampScore(item.score),
             comment: toString(item.comment),
@@ -134,13 +194,17 @@ function normalizeResult(raw: unknown): AnalysisResult {
         .filter((d) => d.name && d.comment !== undefined)
     : [];
 
+  const weightedTotal = computeWeightedTotal(dimensions);
+  const modelTotal = clampScore(match.totalScore);
   const totalScore =
-    clampScore(match.totalScore) ||
-    (dimensions.length > 0
-      ? Math.round(
-          dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length
-        )
-      : 0);
+    weightedTotal ??
+    (modelTotal > 0
+      ? modelTotal
+      : dimensions.length > 0
+        ? Math.round(
+            dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length
+          )
+        : 0);
 
   const suggestions: ResumeSuggestion[] = Array.isArray(data.resumeSuggestions)
     ? data.resumeSuggestions
@@ -189,7 +253,8 @@ interface DeepSeekRawResponse {
 async function callDeepSeek(
   apiKey: string,
   model: string,
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: string }>,
+  seed: number
 ): Promise<{ content: string; usage?: DeepSeekUsage }> {
   const response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
@@ -199,7 +264,8 @@ async function callDeepSeek(
     },
     body: JSON.stringify({
       model,
-      temperature: 0.7,
+      temperature: SAMPLING_TEMPERATURE,
+      seed,
       response_format: { type: "json_object" },
       messages,
     }),
@@ -244,11 +310,12 @@ export async function analyzeResumeWithDeepSeek(
   jobDescription: string
 ): Promise<DeepSeekAnalysis> {
   const { apiKey, model } = getConfig();
+  const seed = deriveSeed(resumeText, jobDescription);
 
   const main = await callDeepSeek(apiKey, model, [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: buildUserPrompt(resumeText, jobDescription) },
-  ]);
+  ], seed);
   const result = normalizeResult(parseJsonContent(main.content));
   let usage = main.usage;
 
@@ -261,7 +328,7 @@ export async function analyzeResumeWithDeepSeek(
           role: "user",
           content: buildRepairUserPrompt(resumeText, jobDescription),
         },
-      ]);
+      ], seed);
       const raw = (parseJsonContent(repair.content) ?? {}) as Record<
         string,
         unknown
@@ -284,4 +351,50 @@ export async function analyzeResumeWithDeepSeek(
   }
 
   return { result, model, usage };
+}
+
+export interface DeepSeekOptimization {
+  result: OptimizedResumeResult;
+  model: string;
+  usage?: DeepSeekUsage;
+}
+
+/**
+ * 针对 JD 优化简历：返回改写后的完整简历全文。
+ * 提示词严格约束：不虚构经历/项目/数字，避免 AI 腔；语言跟随简历原文。
+ */
+export async function optimizeResumeWithDeepSeek(
+  resumeText: string,
+  jobDescription: string
+): Promise<DeepSeekOptimization> {
+  const { apiKey, model } = getConfig();
+  const seed = deriveSeed(resumeText, jobDescription);
+
+  const response = await callDeepSeek(
+    apiKey,
+    model,
+    [
+      { role: "system", content: OPTIMIZE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: buildOptimizeUserPrompt(resumeText, jobDescription),
+      },
+    ],
+    seed
+  );
+
+  const raw = (parseJsonContent(response.content) ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const optimizedResume = toString(raw.optimizedResume).trim();
+  if (!optimizedResume) {
+    throw new DeepSeekError("AI 未返回优化后的简历，请重试。");
+  }
+
+  return {
+    result: { optimizedResume },
+    model,
+    usage: response.usage,
+  };
 }

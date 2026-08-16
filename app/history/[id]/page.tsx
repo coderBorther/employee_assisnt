@@ -11,6 +11,7 @@ import { MatchAnalysisCard } from "@/components/match-analysis-card";
 import { ResumeSuggestionsCard } from "@/components/resume-suggestions-card";
 import { CoverLetterCard } from "@/components/cover-letter-card";
 import { InterviewQuestionsCard } from "@/components/interview-questions-card";
+import { ResumeOptimizer } from "@/components/resume-optimizer";
 import { ArrowLeft, Briefcase, FileText, Leaf, Loader2, TriangleAlert } from "lucide-react";
 import type { AnalysisResult } from "@/lib/types";
 
@@ -177,6 +178,10 @@ export default async function HistoryDetailPage({
             <ResumeSuggestionsCard suggestions={result.resumeSuggestions} />
             <CoverLetterCard text={result.coverLetter} />
             <InterviewQuestionsCard questions={result.interviewQuestions} />
+            <ResumeOptimizer
+              analysisId={analysis.id}
+              resumeFileName={resumeFileName}
+            />
           </div>
         )}
 

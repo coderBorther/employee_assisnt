@@ -1,22 +1,19 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeResumeWithDeepSeek } from "@/lib/deepseek";
 import { createClient } from "@/lib/supabase/server";
+import {
+  DEFAULT_MODEL,
+  EVENT_TYPE_ANALYSIS,
+  MAX_JOB_DESCRIPTION_LENGTH,
+  MAX_RESUME_LENGTH,
+} from "@/lib/constants";
+import {
+  countTodayEvents,
+  getDailyLimit,
+  isUnlimitedUser,
+} from "@/lib/quota";
 import type { AnalysisResult } from "@/lib/types";
-
-const MAX_RESUME_LENGTH = 30_000;
-const MAX_JOB_DESCRIPTION_LENGTH = 8_000;
-const DEFAULT_MODEL = "deepseek-v4-flash";
-
-function getDailyLimit(): number {
-  const raw = Number(process.env.FREE_DAILY_ANALYSIS_LIMIT ?? 5);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 5;
-}
-
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
 
 /** 从 JD 首行提取一个简短标题，便于历史列表展示。 */
 function deriveJobTitle(content: string): string | null {
@@ -80,27 +77,56 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 每日配额检查（只统计成功分析）
-  const limit = getDailyLimit();
-  const { count, error: countError } = await supabase
-    .from("usage_events")
-    .select("id", { count: "exact", head: true })
+  // 相同输入复用：同一简历文字 + 同一岗位描述（同模型）直接返回已有成功结果，
+  // 保证评分稳定，且不重复调用 AI、不消耗配额。用 input_hash（短值）做查询，
+  // 避免把长文本放进 URL 导致连接失败。
+  const currentModel = process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
+  const inputHash = createHash("md5")
+    .update(resumeText + jobDescription)
+    .digest("hex");
+  const { data: cachedAnalysis } = await supabase
+    .from("analyses")
+    .select("id, result")
     .eq("user_id", user.id)
-    .eq("event_type", "analysis")
-    .gte("created_at", startOfToday().toISOString());
-  if (countError) {
-    return NextResponse.json(
-      { error: "用量查询失败，请稍后重试" },
-      { status: 500 }
-    );
+    .eq("status", "success")
+    .eq("model", currentModel)
+    .eq("input_hash", inputHash)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (cachedAnalysis?.result) {
+    return NextResponse.json({
+      result: cachedAnalysis.result,
+      analysisId: cachedAnalysis.id,
+      cached: true,
+    });
   }
-  if ((count ?? 0) >= limit) {
-    return NextResponse.json(
-      {
-        error: `今日免费分析次数已用完（每天 ${limit} 次），请明天再试`,
-      },
-      { status: 429 }
-    );
+
+  // 每日配额检查（只统计成功分析；白名单用户不限次）
+  if (!isUnlimitedUser(user.email)) {
+    const limit = getDailyLimit(EVENT_TYPE_ANALYSIS);
+    let count: number;
+    try {
+      count = await countTodayEvents(
+        supabase,
+        user.id,
+        EVENT_TYPE_ANALYSIS
+      );
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "用量查询失败，请稍后重试" },
+        { status: 500 }
+      );
+    }
+    if (count >= limit) {
+      return NextResponse.json(
+        {
+          error: `今日免费分析次数已用完（每天 ${limit} 次），请明天再试`,
+        },
+        { status: 429 }
+      );
+    }
   }
 
   // 校验简历归属；客户端未传或校验失败时，用文字重建一条记录
@@ -160,6 +186,7 @@ export async function POST(request: NextRequest) {
       job_description_id: jd.id,
       resume_text: resumeText,
       job_description_text: jobDescription,
+      input_hash: inputHash,
       status: "processing",
     })
     .select("id")
@@ -189,7 +216,7 @@ export async function POST(request: NextRequest) {
 
     await supabase.from("usage_events").insert({
       user_id: user.id,
-      event_type: "analysis",
+      event_type: EVENT_TYPE_ANALYSIS,
       model: model || DEFAULT_MODEL,
       input_tokens: usage?.inputTokens ?? null,
       output_tokens: usage?.outputTokens ?? null,

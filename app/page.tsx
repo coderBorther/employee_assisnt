@@ -24,6 +24,7 @@ import { MatchAnalysisCard } from "@/components/match-analysis-card";
 import { ResumeSuggestionsCard } from "@/components/resume-suggestions-card";
 import { CoverLetterCard } from "@/components/cover-letter-card";
 import { InterviewQuestionsCard } from "@/components/interview-questions-card";
+import { ResumeOptimizer } from "@/components/resume-optimizer";
 import { extractTextFromPdf } from "@/lib/pdf";
 import { OCR_MIN_TEXT_CHARS, ocrPdfFromFile } from "@/lib/ocr";
 import type { OcrProgress } from "@/lib/ocr";
@@ -48,6 +49,7 @@ export default function Home() {
   const [analysisId, setAnalysisId] = useState<string | null>(null);
   const [ocrActive, setOcrActive] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
+  const [cachedResult, setCachedResult] = useState(false);
 
   /** 提取成功后，把原始 PDF 上传到私有桶并写入 resumes 表。 */
   const persistResume = async (file: File, text: string) => {
@@ -119,6 +121,7 @@ export default function Home() {
     setIsExtracting(true);
     setResumeText("");
     setResumeId(null);
+    setCachedResult(false);
 
     let text = "";
     try {
@@ -171,6 +174,7 @@ export default function Home() {
     setResumeId(null);
     setOcrActive(false);
     setOcrProgress(null);
+    setCachedResult(false);
     setStatus("idle");
   };
 
@@ -198,6 +202,7 @@ export default function Home() {
       const data = (await res.json().catch(() => null)) as {
         result?: AnalysisResult;
         analysisId?: string;
+        cached?: boolean;
         error?: string;
       } | null;
       if (!res.ok) {
@@ -208,6 +213,7 @@ export default function Home() {
       }
       setResult(data.result);
       setAnalysisId(data.analysisId ?? null);
+      setCachedResult(data.cached ?? false);
       setStatus("success");
       requestAnimationFrame(() => {
         document
@@ -383,7 +389,14 @@ export default function Home() {
                 >
                   我的历史
                 </Link>
+                {cachedResult && "（本次为相同简历与岗位的复用结果，未重新调用 AI）"}
               </p>
+            )}
+            {analysisId && (
+              <ResumeOptimizer
+                analysisId={analysisId}
+                resumeFileName={fileName}
+              />
             )}
             <MatchAnalysisCard data={result.matchAnalysis} />
             <ResumeSuggestionsCard suggestions={result.resumeSuggestions} />
@@ -403,7 +416,7 @@ export default function Home() {
 
         <footer className="mt-10 border-t border-line pt-6 pb-4 text-center">
           <p className="text-xs text-moss-light">
-            🔒 您的简历与分析结果会安全保存到您的账号中，仅您本人可见，可在「我的历史」中随时删除。免费版每天可分析 5 次。生成内容仅供参考，不构成求职结果承诺。
+            🔒 您的简历与分析结果会安全保存到您的账号中，仅您本人可见，可在「我的历史」中随时删除。免费版每天可分析 10 次、优化简历 2 次。生成内容仅供参考，不构成求职结果承诺。
           </p>
         </footer>
       </main>
