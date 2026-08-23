@@ -236,21 +236,31 @@ async function callDeepSeek(
   messages: Array<{ role: string; content: string }>,
   seed: number
 ): Promise<{ content: string; usage?: DeepSeekUsage }> {
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: SAMPLING_TEMPERATURE,
-      seed,
-      response_format: { type: "json_object" },
-      messages,
-    }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(DEEPSEEK_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: SAMPLING_TEMPERATURE,
+        seed,
+        response_format: { type: "json_object" },
+        messages,
+      }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    const message = err instanceof Error ? err.message : String(err);
+    if (name === "TimeoutError" || /timeout|abort/i.test(message)) {
+      throw new DeepSeekError("AI 生成超时（服务响应较慢），请稍后重试。");
+    }
+    throw new DeepSeekError(`DeepSeek API 请求失败（${message}）。请检查网络后重试。`);
+  }
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;

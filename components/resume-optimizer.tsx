@@ -47,6 +47,13 @@ function cleanResumeText(text: string): string {
     .join("\n");
 }
 
+/** 把底层网络/超时英文报错映射为友好中文提示。 */
+function friendlyError(message: string): string {
+  return /timeout|aborted/i.test(message)
+    ? "AI 生成超时（服务响应较慢），请稍后重试"
+    : message;
+}
+
 function ResumeTextBlock({ text }: { text: string }) {
   const lines = text.split("\n");
   return (
@@ -311,7 +318,7 @@ export function ResumeOptimizer({
             <TriangleAlert className="size-4" />
             <AlertTitle>优化失败</AlertTitle>
             <AlertDescription className="flex flex-col items-start gap-3">
-              <span>{error}</span>
+              <span>{friendlyError(error)}</span>
               <Button size="sm" variant="outline" onClick={handleOptimize} disabled={busy}>
                 重试
               </Button>
@@ -355,7 +362,7 @@ export function ResumeOptimizer({
           <ResumeTextBlock text={result.optimizedResume} />
           {error && (
             <p className="text-xs text-clay-deep" role="alert">
-              {error}
+              {friendlyError(error)}
             </p>
           )}
         </CardContent>
