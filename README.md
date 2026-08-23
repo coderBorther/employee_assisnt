@@ -108,7 +108,9 @@ Netlify 免费套餐的同步函数约 10 秒硬超时，而 DeepSeek 调用最�
 
    ```bash
    supabase functions deploy resume-worker
-   supabase db push   # 或手动执行 supabase/migrations/ 下的 SQL
+   # 应用新迁移（若项目此前由后台 SQL Editor 管理，勿用 db push 重跑旧迁移，
+   # 只对新增迁移文件执行）：
+   supabase db query --linked --file supabase/migrations/20260823090000_add_background_job_fields.sql
    ```
 
 4. 配置 Cron（每 5 秒调用 worker；在 SQL Editor 中执行，URL 需替换为你的项目）：
