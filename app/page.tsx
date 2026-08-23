@@ -416,7 +416,7 @@ export default function Home() {
 
         <footer className="mt-10 border-t border-line pt-6 pb-4 text-center">
           <p className="text-xs text-moss-light">
-            🔒 您的简历与分析结果会安全保存到您的账号中，仅您本人可见，可在「我的历史」中随时删除。免费版每天可分析 10 次、优化简历 2 次。生成内容仅供参考，不构成求职结果承诺。
+            🔒 您的简历与分析结果会安全保存到您的账号中，仅您本人可见，可在「我的历史」中随时删除。免费版每天可分析 5 次、优化简历 2 次。生成内容仅供参考，不构成求职结果承诺。
           </p>
         </footer>
       </main>

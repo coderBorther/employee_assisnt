@@ -29,7 +29,7 @@ export function getDailyLimit(eventType: string): number {
   const envName = isOptimization
     ? FREE_DAILY_RESUME_OPTIMIZATION_LIMIT_ENV
     : FREE_DAILY_ANALYSIS_LIMIT_ENV;
-  const fallback = isOptimization ? 2 : 10;
+  const fallback = isOptimization ? 2 : 5;
   const raw = Number(process.env[envName] ?? fallback);
   return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
 }
