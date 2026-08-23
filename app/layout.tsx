@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI 求职助手 — 简历优化 · 求职信 · 面试准备",
+  title: "易小简 —— 一个省事靠谱的求职助手",
   description:
     "上传简历 PDF 并粘贴目标岗位描述，AI 帮你分析岗位匹配度、优化简历、生成求职信与面试题参考回答。",
 };

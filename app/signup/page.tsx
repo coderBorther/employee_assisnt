@@ -90,7 +90,7 @@ function SignupForm() {
           <div className="flex size-12 items-center justify-center rounded-2xl bg-linear-to-br from-mint to-leaf text-white shadow-lg shadow-leaf/25">
             <Leaf className="size-6" />
           </div>
-          <h1 className="mt-4 text-xl font-extrabold">注册 AI 求职助手</h1>
+          <h1 className="mt-4 text-xl font-extrabold">注册易小简</h1>
           <p className="mt-1.5 text-sm text-moss">
             创建账号，保存你的简历与分析历史
           </p>

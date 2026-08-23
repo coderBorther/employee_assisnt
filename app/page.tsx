@@ -263,9 +263,9 @@ export default function Home() {
             <Leaf className="size-5" />
           </div>
           <div>
-            <h1 className="text-[17px] font-bold leading-tight">AI 求职助手</h1>
+            <h1 className="text-[17px] font-bold leading-tight">易小简</h1>
             <p className="text-xs text-moss">
-              简历优化 · 求职信 · 面试准备
+              简历开挂，从一次 AI 分析开始
             </p>
           </div>
           <UserMenu />
