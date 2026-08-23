@@ -49,6 +49,10 @@ export async function generateResumePdf(
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: "A4",
+      // font: null 跳过 pdfkit 默认的 Helvetica 标准字体加载：
+      // 否则构造时就会读 node_modules/pdfkit/js/data/Helvetica.afm，
+      // 而 Netlify 函数打包时不会带上这些数据文件（ENOENT）。
+      font: null as unknown as string,
       margins: {
         top: PAGE_MARGIN,
         bottom: PAGE_MARGIN,

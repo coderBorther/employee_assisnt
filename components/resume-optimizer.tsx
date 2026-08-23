@@ -39,6 +39,19 @@ interface JobStatusResponse {
   errorMessage?: string | null;
 }
 
+/** File System Access API 的最小类型（showSaveFilePicker，Chrome/Edge 支持）。 */
+interface SaveFilePickerWindow {
+  showSaveFilePicker?: (options?: {
+    suggestedName?: string;
+    types?: Array<{ description?: string; accept: Record<string, string[]> }>;
+  }) => Promise<{
+    createWritable: () => Promise<{
+      write: (data: Blob) => Promise<void>;
+      close: () => Promise<void>;
+    }>;
+  }>;
+}
+
 /** 去掉 `## ` 分节标题标记，得到可直接复制的干净文本。 */
 function cleanResumeText(text: string): string {
   return text
@@ -237,10 +250,38 @@ export function ResumeOptimizer({
         throw new Error(data?.error || "PDF 生成失败，请重试");
       }
       const blob = await res.blob();
+      const baseName = `${resumeFileName?.replace(/\.pdf$/i, "").slice(0, 60) || "优化简历"}-优化版.pdf`;
+
+      // 优先弹系统「另存为」对话框，让用户自己选择保存位置（Chrome/Edge）。
+      // 用户取消（AbortError）静默结束；不支持或出错时回退到浏览器默认下载目录。
+      const picker = (window as unknown as SaveFilePickerWindow).showSaveFilePicker;
+      if (picker) {
+        try {
+          const handle = await picker.call(window, {
+            suggestedName: baseName,
+            types: [
+              {
+                description: "PDF 文档",
+                accept: { "application/pdf": [".pdf"] },
+              },
+            ],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (e) {
+          if (e instanceof DOMException && e.name === "AbortError") {
+            return; // 用户取消保存
+          }
+          // 其他异常（如权限被拒）：继续走默认下载兜底
+        }
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${resumeFileName?.replace(/\.pdf$/i, "").slice(0, 60) || "优化简历"}-优化版.pdf`;
+      a.download = baseName;
       document.body.appendChild(a);
       a.click();
       a.remove();
