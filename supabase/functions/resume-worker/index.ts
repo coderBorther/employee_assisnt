@@ -11,7 +11,7 @@
 //
 // 环境变量（Supabase Function Secrets）：
 //   RESUME_WORKER_SECRET       调用鉴权密钥（请求头 x-worker-secret）
-//   SUPABASE_SERVICE_ROLE_KEY  服务端写库（仅服务端使用，绝不暴露到客户端）
+//   SERVICE_ROLE_KEY  服务端写库（仅服务端使用，绝不暴露到客户端）
 //   DEEPSEEK_API_KEY           DeepSeek API Key
 //   DEEPSEEK_MODEL             （可选）模型名，默认 deepseek-v4-flash
 
@@ -56,7 +56,7 @@ function readEnv(): Env {
   return {
     workerSecret: Deno.env.get("RESUME_WORKER_SECRET") ?? "",
     supabaseUrl: Deno.env.get("SUPABASE_URL") ?? "",
-    serviceRoleKey: Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+    serviceRoleKey: Deno.env.get("SERVICE_ROLE_KEY") ?? "",
   };
 }
 
@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
   }
   if (!env.supabaseUrl || !env.serviceRoleKey) {
     return json(
-      { error: "worker 未配置 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY" },
+      { error: "worker 未配置 SUPABASE_URL / SERVICE_ROLE_KEY" },
       { status: 500 }
     );
   }

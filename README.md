@@ -99,7 +99,7 @@ Netlify 免费套餐的同步函数约 10 秒硬超时，而 DeepSeek 调用最�
 
    ```bash
    supabase secrets set RESUME_WORKER_SECRET=<随机长字符串>
-   supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<service_role key>
+   supabase secrets set SERVICE_ROLE_KEY=<service_role key>
    supabase secrets set DEEPSEEK_API_KEY=<DeepSeek API Key>
    supabase secrets set DEEPSEEK_MODEL=deepseek-v4-flash
    ```
