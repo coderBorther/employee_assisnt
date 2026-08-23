@@ -69,10 +69,67 @@
 | `FREE_DAILY_ANALYSIS_LIMIT` | 免费用户每日「智能分析」次数上限 | `5` |
 | `FREE_DAILY_RESUME_OPTIMIZATION_LIMIT` | 免费用户每日「AI 简历优化」次数上限 | `2` |
 | `UNLIMITED_USER_EMAILS` | 免限用户邮箱白名单（逗号分隔） | `mouringx@126.com` |
+| `RESUME_WORKER_URL` | Supabase Edge Function worker URL（设置后分析/优化进入后台队列；留空则本地同步调用） | 空 |
 
 ## 数据库
 
 Schema 迁移位于 `supabase/migrations/`，包含 `profiles`、`resumes`、`job_descriptions`、`analyses`、`resume_optimizations`、`usage_events` 六张表与 `resumes` 私有存储桶，全部开启 RLS（仅本人可读写自己的数据）。
+
+## 后台任务架构与部署（Netlify 免费套餐 10s 超时解决方案）
+
+Netlify 免费套餐的同步函数约 10 秒硬超时，而 DeepSeek 调用最长可达 100 秒以上，直接同步等待必然超时。因此本项目把 AI 调用迁到 **Supabase Edge Function**（免费套餐 wall-clock 上限 150s），Netlify 路由只做毫秒级的「校验 / 入队 / 查状态」：
+
+- `analyses` 与 `resume_optimizations` 复用为任务队列：`pending`（已入队）→ `processing`（worker 已领取）→ `success / error`。
+- Supabase Cron 每 5 秒调用一次 worker（`resume-worker`），worker 原子领取任务并调用 DeepSeek，结果写回数据库。
+- 每用户「智能分析 + 简历优化」在途任务（pending+processing）合计最多 **3 个**；第 4 个会弹出提示「小简八百里加急处理简历中,大人请稍等片刻~」。
+- 前端每 3 秒轮询 `/api/job-status`，任务完成自动展示；跳转其他页面不会中断任务。
+- 未配置 `RESUME_WORKER_URL` 时（如本地 `pnpm dev`），路由走同步调用，行为与旧版一致。
+
+### 部署步骤（首次）
+
+1. 安装并登录 Supabase CLI：
+
+   ```bash
+   brew install supabase/tap/supabase
+   supabase login
+   supabase link --project-ref <你的项目 ref>
+   ```
+
+2. 设置 worker 的 secrets（service_role key 在 Supabase 后台 Settings → API 中获取，仅存服务端）：
+
+   ```bash
+   supabase secrets set RESUME_WORKER_SECRET=<随机长字符串>
+   supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<service_role key>
+   supabase secrets set DEEPSEEK_API_KEY=<DeepSeek API Key>
+   supabase secrets set DEEPSEEK_MODEL=deepseek-v4-flash
+   ```
+
+3. 部署 Edge Function 并应用迁移（迁移会创建队列字段、索引、原子领取函数）：
+
+   ```bash
+   supabase functions deploy resume-worker
+   supabase db push   # 或手动执行 supabase/migrations/ 下的 SQL
+   ```
+
+4. 配置 Cron（每 5 秒调用 worker；在 SQL Editor 中执行，URL 需替换为你的项目）：
+
+   ```sql
+   select cron.schedule(
+     'resume-worker',
+     '5 seconds',
+     $$
+     select net.http_post(
+       url := 'https://<project-ref>.supabase.co/functions/v1/resume-worker',
+       headers := jsonb_build_object(
+         'Content-Type', 'application/json',
+         'x-worker-secret', '<与上面相同的 RESUME_WORKER_SECRET>'
+       )
+     );
+     $$
+   );
+   ```
+
+5. 在 Netlify 后台设置环境变量 `RESUME_WORKER_URL=https://<project-ref>.supabase.co/functions/v1/resume-worker` 后重新部署。
 
 ## 常用命令
 

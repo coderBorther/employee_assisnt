@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Leaf, Loader2, Sparkles, TriangleAlert } from "lucide-react";
+import { FileText, History, Leaf, Loader2, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { ResumeUpload } from "@/components/resume-upload";
 import { JobDescriptionInput } from "@/components/job-description-input";
@@ -25,14 +25,17 @@ import { ResumeSuggestionsCard } from "@/components/resume-suggestions-card";
 import { CoverLetterCard } from "@/components/cover-letter-card";
 import { InterviewQuestionsCard } from "@/components/interview-questions-card";
 import { ResumeOptimizer } from "@/components/resume-optimizer";
+import { ConcurrencyLimitDialog } from "@/components/concurrency-limit-dialog";
+import { ActiveTasksBanner } from "@/components/active-tasks-banner";
 import { extractTextFromPdf } from "@/lib/pdf";
 import { OCR_MIN_TEXT_CHARS, ocrPdfFromFile } from "@/lib/ocr";
 import type { OcrProgress } from "@/lib/ocr";
 import { createClient } from "@/lib/supabase/client";
+import { CONCURRENCY_LIMIT_CODE } from "@/lib/constants";
 import { UserMenu } from "@/components/user-menu";
 import type { AnalysisResult } from "@/lib/types";
 
-type Status = "idle" | "analyzing" | "success" | "error";
+type Status = "idle" | "analyzing" | "submitted" | "success" | "error";
 
 const STEPS = ["上传简历", "粘贴岗位描述", "生成求职材料"];
 
@@ -50,6 +53,7 @@ export default function Home() {
   const [ocrActive, setOcrActive] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
   const [cachedResult, setCachedResult] = useState(false);
+  const [concurrencyOpen, setConcurrencyOpen] = useState(false);
 
   /** 提取成功后，把原始 PDF 上传到私有桶并写入 resumes 表。 */
   const persistResume = async (file: File, text: string) => {
@@ -202,24 +206,40 @@ export default function Home() {
       const data = (await res.json().catch(() => null)) as {
         result?: AnalysisResult;
         analysisId?: string;
+        status?: string;
         cached?: boolean;
         error?: string;
+        code?: string;
       } | null;
+      if (res.status === 429 && data?.code === CONCURRENCY_LIMIT_CODE) {
+        setConcurrencyOpen(true);
+        setStatus("idle");
+        return;
+      }
       if (!res.ok) {
         throw new Error(data?.error || "分析失败，请稍后重试");
       }
-      if (!data?.result) {
+      if (!data) {
         throw new Error("服务返回结果异常，请重试");
       }
-      setResult(data.result);
-      setAnalysisId(data.analysisId ?? null);
-      setCachedResult(data.cached ?? false);
-      setStatus("success");
-      requestAnimationFrame(() => {
-        document
-          .getElementById("results")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      if (data.result) {
+        setResult(data.result);
+        setAnalysisId(data.analysisId ?? null);
+        setCachedResult(data.cached ?? false);
+        setStatus("success");
+        requestAnimationFrame(() => {
+          document
+            .getElementById("results")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        return;
+      }
+      if (data.analysisId && data.status === "pending") {
+        setAnalysisId(data.analysisId);
+        setStatus("submitted");
+        return;
+      }
+      throw new Error("服务返回结果异常，请重试");
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "分析失败，请稍后重试"
@@ -288,6 +308,8 @@ export default function Home() {
           </div>
         </section>
 
+        <ActiveTasksBanner />
+
         {/* input card */}
         <Card className="reveal reveal-1 rounded-2xl border-line shadow-[0_1px_2px_rgba(22,54,42,0.04),0_12px_32px_-12px_rgba(22,54,42,0.10)]">
           <CardHeader>
@@ -353,6 +375,31 @@ export default function Home() {
 
         {status === "analyzing" && <AnalysisSkeleton />}
 
+        {status === "submitted" && (
+          <Card className="mt-6 rounded-2xl border-sprout-deep bg-linear-to-br from-sprout/70 to-card shadow-[0_1px_2px_rgba(22,54,42,0.04),0_12px_32px_-12px_rgba(22,54,42,0.10)]">
+            <CardContent className="flex flex-col items-start gap-3 py-6">
+              <div className="flex items-center gap-3">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-mint to-leaf text-white shadow-md shadow-leaf/25">
+                  <Loader2 className="size-4 animate-spin" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold">已提交，正在后台处理</p>
+                  <p className="text-xs text-moss">
+                    任务已在后台排队处理，期间你可以自由浏览其他页面，任务不会中断。
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/history"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full border border-sprout-deep bg-sprout px-5 text-sm font-semibold text-leaf transition-colors hover:bg-sprout-deep hover:text-leaf-deep"
+              >
+                <History className="size-4" />
+                前往「我的历史」查看进度
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+
         {status === "error" && (
           <Alert variant="destructive" className="mt-6">
             <TriangleAlert className="size-4" />
@@ -413,6 +460,8 @@ export default function Home() {
             )}
           </section>
         )}
+
+        <ConcurrencyLimitDialog open={concurrencyOpen} onOpenChange={setConcurrencyOpen} />
 
         <footer className="mt-10 border-t border-line pt-6 pb-4 text-center">
           <p className="text-xs text-moss-light">

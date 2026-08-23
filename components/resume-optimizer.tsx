@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,16 +10,33 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CopyButton } from "@/components/copy-button";
-import { Download, FileText, Loader2, Sparkles, TriangleAlert } from "lucide-react";
+import { ConcurrencyLimitDialog } from "@/components/concurrency-limit-dialog";
+import { createClient } from "@/lib/supabase/client";
+import {
+  CONCURRENCY_LIMIT_CODE,
+} from "@/lib/constants";
+import {
+  Download,
+  FileText,
+  Loader2,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import type { OptimizedResumeResult } from "@/lib/types";
 
-type Status = "idle" | "loading" | "success" | "error";
+type Status = "idle" | "loading" | "pending" | "success" | "error";
 
 interface ResumeOptimizerProps {
   /** 来源的智能分析记录 ID（用于读取简历 + JD）。 */
   analysisId: string;
   /** 原始简历文件名（用于 PDF 下载命名）。 */
   resumeFileName?: string;
+}
+
+interface JobStatusResponse {
+  status?: string;
+  result?: OptimizedResumeResult | null;
+  errorMessage?: string | null;
 }
 
 /** 去掉 `## ` 分节标题标记，得到可直接复制的干净文本。 */
@@ -54,6 +71,19 @@ function ResumeTextBlock({ text }: { text: string }) {
   );
 }
 
+/** 轮询一次任务状态（kind=optimization）。 */
+async function fetchOptimizationStatus(
+  optimizationId: string
+): Promise<JobStatusResponse> {
+  const res = await fetch(
+    `/api/job-status?kind=optimization&id=${encodeURIComponent(optimizationId)}`
+  );
+  if (!res.ok) {
+    return {};
+  }
+  return (await res.json().catch(() => ({}))) as JobStatusResponse;
+}
+
 export function ResumeOptimizer({
   analysisId,
   resumeFileName,
@@ -64,6 +94,75 @@ export function ResumeOptimizer({
   const [cached, setCached] = useState(false);
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [pollingId, setPollingId] = useState<string | null>(null);
+
+  /** 挂载时恢复：如果该分析已存在优化记录，直接展示其状态，避免跳页后丢失。 */
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    void (async () => {
+      try {
+        const { data } = await supabase
+          .from("resume_optimizations")
+          .select("id, status, result, error_message")
+          .eq("analysis_id", analysisId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (cancelled || !data) return;
+        const row = data as {
+          id: string;
+          status: string;
+          result: unknown;
+          error_message: string | null;
+        };
+        if (row.status === "success") {
+          const text = (row.result as OptimizedResumeResult | null)
+            ?.optimizedResume;
+          if (typeof text === "string" && text.trim()) {
+            setResult({ optimizedResume: text });
+            setOptimizationId(row.id);
+            setCached(true);
+            setStatus("success");
+          }
+        } else if (row.status === "pending" || row.status === "processing") {
+          setOptimizationId(row.id);
+          setStatus("pending");
+          setPollingId(row.id);
+        } else if (row.status === "error") {
+          setError(row.error_message || "简历优化失败，请稍后重试");
+          setStatus("error");
+        }
+      } catch {
+        // 恢复失败不阻塞：用户可点击按钮重新生成
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisId]);
+
+  /** 后台模式下轮询任务状态，直至 success/error。 */
+  useEffect(() => {
+    if (!pollingId || status !== "pending") return;
+    const timer = setInterval(async () => {
+      const data = await fetchOptimizationStatus(pollingId);
+      if (data.status === "success" && data.result?.optimizedResume) {
+        setResult({ optimizedResume: data.result.optimizedResume });
+        setOptimizationId(pollingId);
+        setCached(false);
+        setStatus("success");
+        setPollingId(null);
+      } else if (data.status === "error") {
+        setError(data.errorMessage || "简历优化失败，请稍后重试");
+        setStatus("error");
+        setPollingId(null);
+      }
+      // pending/processing 或网络抖动：继续轮询
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [pollingId, status]);
 
   const handleOptimize = useCallback(async () => {
     setStatus("loading");
@@ -77,9 +176,16 @@ export function ResumeOptimizer({
       const data = (await res.json().catch(() => null)) as {
         result?: OptimizedResumeResult;
         optimizationId?: string;
+        status?: string;
         cached?: boolean;
         error?: string;
+        code?: string;
       } | null;
+      if (res.status === 429 && data?.code === CONCURRENCY_LIMIT_CODE) {
+        setDialogOpen(true);
+        setStatus("idle");
+        return;
+      }
       if (!res.ok) {
         throw new Error(data?.error || "简历优化失败，请稍后重试");
       }
@@ -87,13 +193,20 @@ export function ResumeOptimizer({
         throw new Error("服务返回结果异常，请重试");
       }
       const text = data.result?.optimizedResume;
-      if (typeof text !== "string" || !text.trim()) {
-        throw new Error("服务返回结果异常，请重试");
+      if (typeof text === "string" && text.trim()) {
+        setResult({ optimizedResume: text });
+        setOptimizationId(data.optimizationId ?? null);
+        setCached(data.cached ?? false);
+        setStatus("success");
+        return;
       }
-      setResult({ optimizedResume: text });
-      setOptimizationId(data.optimizationId ?? null);
-      setCached(data.cached ?? false);
-      setStatus("success");
+      if (data.optimizationId && data.status === "pending") {
+        setOptimizationId(data.optimizationId);
+        setStatus("pending");
+        setPollingId(data.optimizationId);
+        return;
+      }
+      throw new Error("服务返回结果异常，请重试");
     } catch (e) {
       setError(e instanceof Error ? e.message : "简历优化失败，请稍后重试");
       setStatus("error");
@@ -132,7 +245,7 @@ export function ResumeOptimizer({
     }
   }, [optimizationId, resumeFileName, downloading]);
 
-  const busy = status === "loading";
+  const busy = status === "loading" || status === "pending";
   const copyText = result ? cleanResumeText(result.optimizedResume) : "";
 
   return (
@@ -155,10 +268,15 @@ export function ResumeOptimizer({
             disabled={busy}
             className="h-10 gap-2 rounded-full bg-linear-to-br from-leaf-soft to-leaf px-6 font-display font-bold text-white shadow-lg shadow-leaf/30 hover:from-leaf-soft hover:to-leaf-deep"
           >
-            {busy ? (
+            {status === "loading" ? (
               <>
                 <Loader2 className="size-4 animate-spin" />
-                正在优化…
+                正在提交…
+              </>
+            ) : status === "pending" ? (
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                优化中…
               </>
             ) : result ? (
               <>
@@ -174,6 +292,18 @@ export function ResumeOptimizer({
           </Button>
         </div>
       </CardHeader>
+
+      {status === "pending" && (
+        <CardContent>
+          <Alert className="border-sprout-deep bg-sprout/60">
+            <Loader2 className="size-4 animate-spin text-leaf" />
+            <AlertTitle>正在后台优化中</AlertTitle>
+            <AlertDescription>
+              已提交后台处理，可先前往其他页面，完成后回到本页即可看到结果（页面会自动刷新）。
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      )}
 
       {status === "error" && error && (
         <CardContent>
@@ -230,6 +360,8 @@ export function ResumeOptimizer({
           )}
         </CardContent>
       )}
+
+      <ConcurrencyLimitDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </Card>
   );
 }

@@ -9,12 +9,20 @@ import {
   MAX_RESUME_LENGTH,
 } from "@/lib/constants";
 import { countTodayEvents, getDailyLimit, isUnlimitedUser } from "@/lib/quota";
+import {
+  concurrencyLimitError,
+  countActiveJobs,
+  findInFlightByInputHash,
+  isWorkerEnabled,
+} from "@/lib/jobs";
 import type { OptimizedResumeResult } from "@/lib/types";
 
 /**
  * POST /api/optimize-resume
  * 根据某次成功的「智能分析」记录（analysisId），用其保存的简历文字 + JD，
- * 调用 DeepSeek 生成针对该 JD 改写后的完整简历（禁止虚构、去 AI 味）。
+ * 生成针对该 JD 改写后的简历（禁止虚构、去 AI 味）。
+ * - 后台模式（配置 RESUME_WORKER_URL）：入队（status=pending）后立即返回，AI 由 worker 处理。
+ * - 本地兜底（未配置）：同步调用 DeepSeek，行为与旧版一致。
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -163,7 +171,36 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 优化记录（先置为 processing）
+  // 并发检查 + 同输入在途去重（仅后台模式需要）
+  if (isWorkerEnabled()) {
+    let active: number;
+    try {
+      active = await countActiveJobs(supabase, user.id);
+    } catch {
+      return NextResponse.json(
+        { error: "任务状态查询失败，请稍后重试" },
+        { status: 500 }
+      );
+    }
+    if (active >= 3) {
+      return NextResponse.json(concurrencyLimitError(), { status: 429 });
+    }
+
+    const inFlight = await findInFlightByInputHash(
+      supabase,
+      user.id,
+      "resume_optimizations",
+      inputHash
+    );
+    if (!inFlight.error && inFlight.data) {
+      return NextResponse.json({
+        optimizationId: inFlight.data.id,
+        status: "pending",
+      });
+    }
+  }
+
+  // 优化记录（入队：status=pending，由后台 worker 处理）
   const { data: optimization, error: createError } = await supabase
     .from("resume_optimizations")
     .insert({
@@ -174,7 +211,7 @@ export async function POST(request: NextRequest) {
       resume_text: resumeText,
       job_description_text: jobDescription,
       input_hash: inputHash,
-      status: "processing",
+      status: "pending",
     })
     .select("id")
     .single();
@@ -185,6 +222,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 后台模式：立即返回，AI 由 worker 处理（前端轮询 /api/job-status）
+  if (isWorkerEnabled()) {
+    return NextResponse.json({
+      optimizationId: optimization.id,
+      status: "pending",
+    });
+  }
+
+  // 本地开发兜底（未配置 RESUME_WORKER_URL）：同步调用 AI，行为与旧版一致
   try {
     const { result, model, usage } = await optimizeResumeWithDeepSeek(
       resumeText,

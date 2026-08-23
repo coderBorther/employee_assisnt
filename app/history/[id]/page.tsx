@@ -12,6 +12,7 @@ import { ResumeSuggestionsCard } from "@/components/resume-suggestions-card";
 import { CoverLetterCard } from "@/components/cover-letter-card";
 import { InterviewQuestionsCard } from "@/components/interview-questions-card";
 import { ResumeOptimizer } from "@/components/resume-optimizer";
+import { HistoryAutoRefresh } from "@/components/history-auto-refresh";
 import { ArrowLeft, Briefcase, FileText, Leaf, Loader2, TriangleAlert } from "lucide-react";
 import type { AnalysisResult } from "@/lib/types";
 
@@ -41,6 +42,7 @@ export default async function HistoryDetailPage({
   if (!analysis) notFound();
 
   const status = analysis.status as string;
+  const hasActive = status === "pending" || status === "processing";
   const result = (analysis.result ?? null) as AnalysisResult | null;
   const errorMessage = (analysis.error_message as string | null) ?? "";
 
@@ -89,6 +91,7 @@ export default async function HistoryDetailPage({
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
+        <HistoryAutoRefresh hasActive={hasActive} />
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <Link
             href="/history"
@@ -145,12 +148,12 @@ export default async function HistoryDetailPage({
           </Card>
         )}
 
-        {status === "processing" && (
-          <Alert className="mb-6">
-            <Loader2 className="size-4 animate-spin" />
-            <AlertTitle>分析仍在进行中</AlertTitle>
+        {hasActive && (
+          <Alert className="mb-6 border-sprout-deep bg-sprout/60">
+            <Loader2 className="size-4 animate-spin text-leaf" />
+            <AlertTitle>正在后台处理中</AlertTitle>
             <AlertDescription>
-              这条记录可能是在中断时创建的，请返回重新分析。
+              任务正在后台运行，页面每 3 秒自动刷新，完成后会直接展示结果；期间你可以自由浏览其他页面，任务不会中断。
             </AlertDescription>
           </Alert>
         )}

@@ -1,9 +1,13 @@
+// 与 lib/deepseek.ts 保持同步（两处需一致；修改逻辑时务必同时更新两处）。
+// Edge Function（Deno）环境：使用 Deno.env.get，超时压到 100s，保证在 150s wall-clock 内完成。
 import {
   SYSTEM_PROMPT,
   OPTIMIZE_SYSTEM_PROMPT,
   buildUserPrompt,
   buildOptimizeUserPrompt,
-} from "./prompt";
+  REPAIR_SYSTEM_PROMPT,
+  buildRepairUserPrompt,
+} from "./prompt.ts";
 import type {
   AnalysisResult,
   DimensionKey,
@@ -12,14 +16,12 @@ import type {
   OptimizedResumeResult,
   Priority,
   ResumeSuggestion,
-} from "./types";
-
-// 注意：本文件与 supabase/functions/_shared/deepseek.ts 保持同步（本地同步模式用本文件，
-// 生产后台 worker 用 _shared 副本，其超时为 100s）。修改逻辑时务必同时更新两处。
+} from "./types.ts";
 
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MODEL = "deepseek-v4-flash";
-const REQUEST_TIMEOUT_MS = 120_000;
+/** 后台 worker 的超时预算：Edge Function 免费套餐 wall-clock 上限 150s，留足余量。 */
+const REQUEST_TIMEOUT_MS = 100_000;
 
 /** 采样温度：越低越确定（配合固定 seed，同输入结果基本一致）。 */
 const SAMPLING_TEMPERATURE = 0.2;
@@ -86,39 +88,14 @@ export interface DeepSeekAnalysis {
   usage?: DeepSeekUsage;
 }
 
-/** 主分析结果缺面试题时，用一次聚焦请求补齐。 */
-const REPAIR_SYSTEM_PROMPT = `你是一名求职面试官。请根据用户的简历与目标岗位描述，生成该岗位最可能被问到的面试问题及参考回答。
-
-规则：
-1. 输出语言必须跟随「目标岗位描述」的语言。
-2. 只输出一个合法 JSON 对象，不要输出任何其他内容。
-3. 必须严格按照以下结构返回：
-{
-  "interviewQuestions": [{ "question": "问题", "referenceAnswer": "参考回答" }]
-}
-4. interviewQuestions 必须恰好 10 条，绝不能为空；实在无法生成针对该岗位的问题时，给出该岗位通用的高频面试题兜底。`;
-
-function buildRepairUserPrompt(
-  resumeText: string,
-  jobDescription: string
-): string {
-  return `【目标岗位描述】
-${jobDescription}
-
-【我的简历文字】
-${resumeText}
-
-请只输出 interviewQuestions（10 条），不要输出其他内容。`;
-}
-
 function getConfig(): { apiKey: string; model: string } {
-  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const apiKey = Deno.env.get("DEEPSEEK_API_KEY");
   if (!apiKey) {
     throw new DeepSeekError(
-      "未配置 DEEPSEEK_API_KEY，请在 .env.local 中设置后重启服务。"
+      "未配置 DEEPSEEK_API_KEY（Edge Function secret），请在 Supabase 中设置后重试。"
     );
   }
-  const model = process.env.DEEPSEEK_MODEL?.trim() || DEFAULT_MODEL;
+  const model = Deno.env.get("DEEPSEEK_MODEL")?.trim() || DEFAULT_MODEL;
   return { apiKey, model };
 }
 

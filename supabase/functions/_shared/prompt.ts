@@ -1,5 +1,5 @@
-// 注意：本文件与 supabase/functions/_shared/prompt.ts 保持同步（本地同步模式用本文件，
-// 生产后台 worker 用 _shared 副本）。修改提示词时务必同时更新两处。
+// 与 lib/prompt.ts 保持同步（两处需一致；修改提示词时务必同时更新两处）。
+// Edge Function（Deno）无法直接复用 Next.js 的 lib/，故独立维护一份副本。
 
 export const SYSTEM_PROMPT = `你是一名资深的求职顾问与招聘官，擅长针对具体岗位分析简历并给出可落地的求职材料优化建议。
 
@@ -79,4 +79,29 @@ ${resumeText}
 {
   "optimizedResume": "优化后的完整简历全文"
 }`;
+}
+
+/** 主分析结果缺面试题时，用一次聚焦请求补齐。 */
+export const REPAIR_SYSTEM_PROMPT = `你是一名求职面试官。请根据用户的简历与目标岗位描述，生成该岗位最可能被问到的面试问题及参考回答。
+
+规则：
+1. 输出语言必须跟随「目标岗位描述」的语言。
+2. 只输出一个合法 JSON 对象，不要输出任何其他内容。
+3. 必须严格按照以下结构返回：
+{
+  "interviewQuestions": [{ "question": "问题", "referenceAnswer": "参考回答" }]
+}
+4. interviewQuestions 必须恰好 10 条，绝不能为空；实在无法生成针对该岗位的问题时，给出该岗位通用的高频面试题兜底。`;
+
+export function buildRepairUserPrompt(
+  resumeText: string,
+  jobDescription: string
+): string {
+  return `【目标岗位描述】
+${jobDescription}
+
+【我的简历文字】
+${resumeText}
+
+请只输出 interviewQuestions（10 条），不要输出其他内容。`;
 }

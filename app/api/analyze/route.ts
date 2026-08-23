@@ -13,6 +13,12 @@ import {
   getDailyLimit,
   isUnlimitedUser,
 } from "@/lib/quota";
+import {
+  concurrencyLimitError,
+  countActiveJobs,
+  findInFlightByInputHash,
+  isWorkerEnabled,
+} from "@/lib/jobs";
 import type { AnalysisResult } from "@/lib/types";
 
 /** 从 JD 首行提取一个简短标题，便于历史列表展示。 */
@@ -129,6 +135,36 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 并发检查：每用户「智能分析 + 简历优化」在途任务（pending+processing）合计最多 3 个
+  if (isWorkerEnabled()) {
+    let active: number;
+    try {
+      active = await countActiveJobs(supabase, user.id);
+    } catch {
+      return NextResponse.json(
+        { error: "任务状态查询失败，请稍后重试" },
+        { status: 500 }
+      );
+    }
+    if (active >= 3) {
+      return NextResponse.json(concurrencyLimitError(), { status: 429 });
+    }
+
+    // 同输入已在途（pending/processing）则直接复用，避免重复入队
+    const inFlight = await findInFlightByInputHash(
+      supabase,
+      user.id,
+      "analyses",
+      inputHash
+    );
+    if (!inFlight.error && inFlight.data) {
+      return NextResponse.json({
+        analysisId: inFlight.data.id,
+        status: "pending",
+      });
+    }
+  }
+
   // 校验简历归属；客户端未传或校验失败时，用文字重建一条记录
   let finalResumeId: string | null = null;
   if (resumeId) {
@@ -177,7 +213,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 分析记录（先置为 processing）
+  // 分析记录（入队：status=pending，由后台 worker 处理）
   const { data: analysis, error: analysisError } = await supabase
     .from("analyses")
     .insert({
@@ -187,7 +223,7 @@ export async function POST(request: NextRequest) {
       resume_text: resumeText,
       job_description_text: jobDescription,
       input_hash: inputHash,
-      status: "processing",
+      status: "pending",
     })
     .select("id")
     .single();
@@ -198,6 +234,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 后台模式：立即返回，AI 由 worker 处理（前端轮询 /api/job-status）
+  if (isWorkerEnabled()) {
+    return NextResponse.json({
+      analysisId: analysis.id,
+      status: "pending",
+    });
+  }
+
+  // 本地开发兜底（未配置 RESUME_WORKER_URL）：同步调用 AI，行为与旧版一致
   try {
     const { result, model, usage } = await analyzeResumeWithDeepSeek(
       resumeText,

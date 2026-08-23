@@ -46,3 +46,6 @@ next-env.d.ts
 
 # pnpm store cache
 .pnpm-store
+
+# Supabase CLI temp files
+supabase/.temp/

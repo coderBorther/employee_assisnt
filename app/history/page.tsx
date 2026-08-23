@@ -5,6 +5,7 @@ import { formatDate, totalScoreFromResult } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DeleteAnalysisButton } from "@/components/delete-analysis-button";
+import { HistoryAutoRefresh } from "@/components/history-auto-refresh";
 import { UserMenu } from "@/components/user-menu";
 import { ArrowLeft, History, Leaf, Sparkles } from "lucide-react";
 
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 interface HistoryRow {
   id: string;
   created_at: string;
-  status: "processing" | "success" | "error";
+  status: "pending" | "processing" | "success" | "error";
   result: unknown;
   job_descriptions: unknown;
   resumes: unknown;
@@ -24,6 +25,10 @@ const STATUS_META: Record<
   { label: string; className: string }
 > = {
   success: { label: "成功", className: "bg-sprout text-leaf hover:bg-sprout" },
+  pending: {
+    label: "排队中",
+    className: "bg-sand text-sand-deep hover:bg-sand",
+  },
   processing: {
     label: "处理中",
     className: "bg-sand text-sand-deep hover:bg-sand",
@@ -67,6 +72,10 @@ export default async function HistoryPage() {
 
   const analyses = (data ?? []) as unknown as HistoryRow[];
 
+  const hasActive = analyses.some(
+    (r) => r.status === "pending" || r.status === "processing"
+  );
+
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="sticky top-0 z-10 border-b border-line/70 bg-background/80 backdrop-blur">
@@ -92,6 +101,7 @@ export default async function HistoryPage() {
       </header>
 
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
+        <HistoryAutoRefresh hasActive={hasActive} />
         <div className="mb-6 flex items-center gap-2.5">
           <span
             aria-hidden="true"
