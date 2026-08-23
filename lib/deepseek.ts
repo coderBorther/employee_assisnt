@@ -271,6 +271,11 @@ async function callDeepSeek(
         model,
         temperature: SAMPLING_TEMPERATURE,
         seed,
+        // 关闭模型的隐藏推理（deepseek-v4-flash 默认对长文本生成会做 1.5 万+ reasoning
+        // tokens，导致单次调用耗时 >100s 超时）；关闭后优化/分析均在 10s 内完成。
+        thinking: { type: "disabled" },
+        // 输出上限兜底，防止生成失控
+        max_tokens: 8192,
         response_format: { type: "json_object" },
         messages,
       }),
